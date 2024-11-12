@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: stress-daemonset
+spec:
+  selector:
+    matchLabels:
+      app: stress
+  template:
+    metadata:
+      labels:
+        app: stress
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        args:
+        - "stress"
+        - "--vm"
+        - "1"          # Reduced VM workers to fit instance size
+        - "--vm-bytes"
+        - "1024M"       # Reduced memory allocation per VM worker
+        - "--cpu"
+        - "2"          # Limit CPU workers to match t3.small vCPUs
+        - "--timeout"
+        - "1000s"      # Optional: duration of stress
+        resources:
+          requests:
+            memory: "1Gi"  # Requested memory for proper scheduling
+            cpu: "1"       # Requested CPU to match capacity
+          limits:
+            memory: "2Gi"  # Max memory allowed
+            cpu: "2"       # Max CPU allowed
