@@ -1,0 +1,45 @@
+#!/bin/bash
+
+REGION="us-east-1"
+ROLE_ARN="arn:aws:iam::975050207746:role/test-role"
+PARAMETER_NAME="/path/to/your/parameter"
+SESSION_NAME="ASSUME_SESSION"
+
+echo "Assuming role = $ROLE_ARN..."
+ASSUME_ROLE_OUTPUT=$(aws sts assume-role --role-arn "$ROLE_ARN" --role-session-name "$SESSION_NAME" 2>/dev/null)
+
+if [ $? -ne 0 ]; then
+    echo "Failed to assume role: $ROLE_ARN"
+    exit 1
+fi
+
+AWS_ACCESS_KEY_ID=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.AccessKeyId')
+AWS_SECRET_ACCESS_KEY=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.SecretAccessKey')
+AWS_SESSION_TOKEN=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.SessionToken')
+
+if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ] || [ -z "$AWS_SESSION_TOKEN" ]; then
+    echo "Failed to extract temporary credentials. Exiting."
+    exit 1
+fi
+
+export AWS_ACCESS_KEY_ID
+export AWS_SECRET_ACCESS_KEY
+export AWS_SESSION_TOKEN
+
+echo "Role assumed successfully."
+
+echo "Retrieving parameter: $PARAMETER_NAME..."
+PARAMETER_OUTPUT=$(aws ssm get-parameter --name "$PARAMETER_NAME" --with-decryption --region "$REGION" 2>/dev/null)
+
+if [ $? -ne 0 ]; then
+    echo "Failed to retrieve parameter: $PARAMETER_NAME"
+    exit 1
+fi
+
+PARAMETER_VALUE=$(echo "$PARAMETER_OUTPUT" | jq -r '.Parameter.Value')
+
+if [ -z "$PARAMETER_VALUE" ]; then
+    echo "Failed to extract parameter value. Exiting."
+    exit 1
+fi
+# updating access & Secret Key
