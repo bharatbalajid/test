@@ -43,3 +43,6 @@ if [ -z "$PARAMETER_VALUE" ]; then
     exit 1
 fi
 # updating access & Secret Key
+
+kubectl get nodes -o jsonpath="{.items[*].status.addresses[?(@.type=='InternalIP')].address}" | tr ' ' '\n'
+
