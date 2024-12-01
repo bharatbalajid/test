@@ -1,0 +1,154 @@
+#!/bin/bash
+
+CLUSTER_NAME="D2B-BHARAT-INFRA-NV-K8S-01"
+NAMESPACE="kube-system"
+
+# Declare arrays
+declare -a CHECK_RESULTS
+declare -a CRITICAL_EVENTS
+declare -a NON_RUNNING_PODS
+
+# Add check results
+add_check_result() {
+  local check_name=$1
+  local status=$2
+  CHECK_RESULTS+=("$check_name|$status")
+}
+
+# Check EKS control plane health
+check_cluster_status() {
+  local status=$(aws eks describe-cluster --name "$CLUSTER_NAME" --query 'cluster.status' --output text)
+  if [ "$status" == "ACTIVE" ]; then
+    add_check_result "Cluster Status" "PASS"
+    return 0
+  else
+    add_check_result "Cluster Status" "FAIL"
+    return 1
+  fi
+}
+
+# Check node health
+check_node_status() {
+  local not_ready_nodes=$(kubectl get nodes --no-headers | grep -v ' Ready ' | wc -l)
+  if [ "$not_ready_nodes" -eq 0 ]; then
+    add_check_result "Node Status" "PASS"
+    return 0
+  else
+    add_check_result "Node Status" "FAIL"
+    return 1
+  fi
+}
+
+# Check all pods across namespaces
+check_pod_status() {
+  NON_RUNNING_PODS=$(kubectl get pods --all-namespaces --no-headers | grep -v 'Running\|Completed')
+  if [ -z "$NON_RUNNING_PODS" ]; then
+    add_check_result "Pod Status (All Namespaces)" "PASS"
+  else
+    add_check_result "Pod Status (All Namespaces)" "FAIL"
+  fi
+}
+
+# Check kube-system pods specifically
+check_kube_system_pods() {
+  local not_running_kube_system=$(kubectl get pods -n "$NAMESPACE" --no-headers | grep -v 'Running\|Completed' | wc -l)
+  if [ "$not_running_kube_system" -eq 0 ]; then
+    add_check_result "Pod Status (kube-system)" "PASS"
+    return 0
+  else
+    add_check_result "Pod Status (kube-system)" "FAIL"
+    return 1
+  fi
+}
+
+# Check DNS
+check_dns() {
+  kubectl run dns-test --image=busybox --rm -it --restart=Never -- nslookup kubernetes.default.svc.cluster.local &> /dev/null
+  if [ $? -eq 0 ]; then
+    add_check_result "DNS Resolution" "PASS"
+    return 0
+  else
+    add_check_result "DNS Resolution" "FAIL"
+    return 1
+  fi
+}
+
+# Check storage classes
+check_storage_classes() {
+  local storage_classes=$(kubectl get storageclass --no-headers | wc -l)
+  if [ "$storage_classes" -gt 0 ]; then
+    add_check_result "Storage Classes" "PASS"
+    return 0
+  else
+    add_check_result "Storage Classes" "FAIL"
+    return 1
+  fi
+}
+
+# Check cluster autoscaler
+check_cluster_autoscaler() {
+  local autoscaler_running=$(kubectl get pods -n "$NAMESPACE" | grep cluster-autoscaler | grep Running | wc -l)
+  if [ "$autoscaler_running" -gt 0 ]; then
+    add_check_result "Cluster Autoscaler" "PASS"
+    return 0
+  else
+    add_check_result "Cluster Autoscaler" "FAIL"
+    return 1
+  fi
+}
+
+# Check critical events
+check_critical_events() {
+  CRITICAL_EVENTS=$(kubectl get events --all-namespaces --field-selector type=Warning -o custom-columns=NAME:.metadata.name,NAMESPACE:.metadata.namespace,REASON:.reason,MESSAGE:.message --no-headers)
+  TOTAL_EVENTS=$(echo "$CRITICAL_EVENTS" | wc -l)
+  add_check_result "Critical Events" "$TOTAL_EVENTS Events"
+}
+
+# Print results in table format
+print_results() {
+  echo -e "\nCluster Health Report:"
+  printf "%-30s | %-10s\n" "Check" "Status"
+  echo "------------------------------|------------"
+  for result in "${CHECK_RESULTS[@]}"; do
+    IFS="|" read -r check status <<< "$result"
+    printf "%-30s | %-10s\n" "$check" "$status"
+  done
+  
+  # Check if critical events exist
+  if [ -n "$CRITICAL_EVENTS" ]; then
+    echo -e "\nList of Critical Events:"
+    printf "%-40s | %-15s | %-20s | %-50s\n" "Event" "Namespace" "Reason" "Message"
+    echo "----------------------------------------|-----------------|----------------------|--------------------------------------------------"
+    while IFS=$'\t' read -r name namespace reason message; do
+      printf "%-40s | %-15s | %-20s | %-50s\n" "$name" "$namespace" "$reason" "$message"
+    done <<< "$CRITICAL_EVENTS"
+  fi
+
+  if [ -n "$NON_RUNNING_PODS" ]; then
+    echo -e "\nNon-Running Pods in Other Namespaces:"
+    echo "$NON_RUNNING_PODS"
+  fi
+}
+
+# Main function
+evaluate_cluster_health() {
+  check_cluster_status
+  check_node_status
+  check_pod_status
+  check_dns
+  check_storage_classes
+  check_cluster_autoscaler
+  check_kube_system_pods
+}
+
+# Execute health evaluation
+evaluate_cluster_health
+check_critical_events
+print_results
+
+# Final recommendation
+if [[ "${CHECK_RESULTS[*]}" != *"FAIL"* ]] && [ -z "$NON_RUNNING_PODS" ]; then
+  echo -e "\nCluster is healthy. Good to upgrade."
+else
+  echo -e "\nCluster is not healthy. Not good to upgrade."
+fi
