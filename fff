@@ -2,6 +2,7 @@
 
 CLUSTER_NAME="D2B-BHARAT-INFRA-NV-K8S-01"
 NAMESPACE="kube-system"
+REGION="us-east-1"
 
 # Declare arrays
 declare -a CHECK_RESULTS
@@ -17,7 +18,7 @@ add_check_result() {
 
 # Check EKS control plane health
 check_cluster_status() {
-  local status=$(aws eks describe-cluster --name "$CLUSTER_NAME" --query 'cluster.status' --output text)
+  local status=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" --query 'cluster.status' --output text)
   if [ "$status" == "ACTIVE" ]; then
     add_check_result "Cluster Status" "PASS"
     return 0
